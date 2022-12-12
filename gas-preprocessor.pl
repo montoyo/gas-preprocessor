@@ -904,7 +904,7 @@ sub handle_serialized_line {
                      ($arch eq "aarch64" and !is_aarch64_register($target))) {
                 $call_targets{$target}++;
             }
-        } elsif ($line =~ /(?:^|\n)\s*(\w+\s*:\s*)?(cbn?z|adr|tbz)\s+(\w+)\s*,(\s*#\d+\s*,)?\s*(\w+)/) {
+        } elsif ($line =~ /(?:^|\n)\s*(\w+\s*:\s*)?(cbn?z|adr|tbn?z)\s+(\w+)\s*,(\s*#\d+\s*,)?\s*(\w+)/) {
             my $instr = $2;
             my $reg = $3;
             my $bit = $4;
@@ -918,6 +918,13 @@ sub handle_serialized_line {
             # Convert tbz with a wX register into an xX register,
             # due to armasm64 bugs/limitations.
             if ($instr eq "tbz" and $reg =~ /w\d+/) {
+                my $xreg = $reg;
+                $xreg =~ s/w/x/;
+                $line =~ s/\b$reg\b/$xreg/;
+            }
+            
+            # Same with tbnz
+            if ($instr eq "tbnz" and $reg =~ /w\d+/) {
                 my $xreg = $reg;
                 $xreg =~ s/w/x/;
                 $line =~ s/\b$reg\b/$xreg/;
@@ -1063,7 +1070,25 @@ sub handle_serialized_line {
             }
 
             # Convert "ld1 {v0.4h-v3.4h}" into "ld1 {v0.4h,v1.4h,v2.4h,v3.4h}"
-            if ($line =~ /(?:ld|st)\d\s+({\s*v(\d+)\.(\d[bhsdBHSD])\s*-\s*v(\d+)\.(\d[bhsdBHSD])\s*})/) {
+            if ($line =~ /(?:ld|st)\d\s+({\s*v(\d+)\.(\d+[bhsdBHSD])\s*-\s*v(\d+)\.(\d+[bhsdBHSD])\s*})/) {
+                my $regspec = $1;
+                my $reg1 = $2;
+                my $layout1 = $3;
+                my $reg2 = $4;
+                my $layout2 = $5;
+                if ($layout1 eq $layout2) {
+                    my $new_regspec = "{";
+                    foreach my $i ($reg1 .. $reg2) {
+                        $new_regspec .= "," if ($i > $reg1);
+                        $new_regspec .= "v$i.$layout1";
+                    }
+                    $new_regspec .= "}";
+                    $line =~ s/$regspec/$new_regspec/;
+                }
+            }
+
+            # Convert "tbx vXX, {v0.4h-v3.4h}" into "tbx vXX, {v0.4h,v1.4h,v2.4h,v3.4h}"
+            if ($line =~ /tbx\s+v\d+\.\d+[bhsdBHSD]\s*,\s*({\s*v(\d+)\.(\d+[bhsdBHSD])\s*-\s*v(\d+)\.(\d+[bhsdBHSD])\s*})/) {
                 my $regspec = $1;
                 my $reg1 = $2;
                 my $layout1 = $3;
